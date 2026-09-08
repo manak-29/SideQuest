@@ -1,0 +1,51 @@
+city,state,violent_crime_rate,property_crime_rate
+New York,NY,363.8,1438.7
+Los Angeles,CA,487.1,2265.4
+Chicago,IL,967.5,3538.7
+Houston,TX,976.3,4891.2
+Phoenix,AZ,614.7,3912.5
+Philadelphia,PA,989.3,2361.4
+San Antonio,TX,675.2,4218.9
+San Diego,CA,232.4,1624.3
+Dallas,TX,752.3,3981.2
+Austin,TX,398.5,4361.7
+San Jose,CA,211.4,2200.1
+Jacksonville,FL,656.8,3515.3
+Fort Worth,TX,438.2,3386.7
+Columbus,OH,693.2,4019.8
+Charlotte,NC,621.1,3598.4
+Indianapolis,IN,1022.6,4351.2
+San Francisco,CA,539.4,4980.6
+Seattle,WA,623.8,4390.2
+Denver,CO,637.2,3945.1
+Oklahoma City,OK,756.4,4891.3
+Nashville,TN,1014.3,3953.7
+El Paso,TX,324.5,2952.4
+Washington,DC,811.2,3544.8
+Boston,MA,604.3,1927.4
+Las Vegas,NV,712.4,3658.2
+Portland,OR,685.3,4415.7
+Detroit,MI,1965.4,4208.5
+Louisville,KY,791.2,3542.8
+Memphis,TN,1394.5,5324.1
+Baltimore,MD,1833.4,3524.6
+Milwaukee,WI,1332.7,4201.3
+Albuquerque,NM,915.2,4954.8
+Tucson,AZ,631.4,4261.2
+Fresno,CA,612.8,3521.4
+Sacramento,CA,624.3,3104.7
+Kansas City,MO,1312.6,4528.3
+Mesa,AZ,322.4,2847.1
+Atlanta,GA,1029.8,4832.4
+Omaha,NE,571.3,3782.5
+Colorado Springs,CO,534.2,3021.4
+Raleigh,NC,402.1,2315.8
+Miami,FL,762.3,4321.5
+Long Beach,CA,512.7,2894.3
+Virginia Beach,VA,162.4,1987.2
+Oakland,CA,1249.3,5241.7
+Minneapolis,MN,1014.2,4871.3
+Tulsa,OK,1082.4,5124.6
+Tampa,FL,462.3,2847.5
+Arlington,TX,245.8,2461.3
+New Orleans,LA,1121.4,5024.8

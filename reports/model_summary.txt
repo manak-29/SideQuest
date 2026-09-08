@@ -1,0 +1,32 @@
+
+============================================================
+SIDEQUEST UNIFIED MODEL SUMMARY
+============================================================
+
+Number of tasks: 4
+Tasks trained: ['hidden_gem', 'safety_score', 'collaboration_auth', 'fake_detection']
+
+
+HIDDEN_GEM:
+  R² Score: 0.8019
+  RMSE: 8.2914
+
+SAFETY_SCORE:
+  R² Score: 0.8893
+  RMSE: 3.2522
+
+COLLABORATION_AUTH:
+  Accuracy: 0.8956
+  Precision: 0.8923
+  Recall: 0.8956
+  F1 Score: 0.8912
+  AUC-ROC: 0.9456
+
+FAKE_DETECTION:
+  Accuracy: 0.9227
+  Precision: 0.9190
+  Recall: 0.9227
+  F1 Score: 0.9158
+  AUC-ROC: 0.9422
+
+============================================================
