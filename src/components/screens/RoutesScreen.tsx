@@ -35,6 +35,9 @@ export const RoutesScreen: React.FC<RoutesScreenProps> = ({
   const [travelStyle, setTravelStyle] = useState('Adventure');
   const [isFindingGems, setIsFindingGems] = useState(false);
   const [suggestedGems, setSuggestedGems] = useState<HiddenGem[] | null>(null);
+  const [budget, setBudget] = useState('');
+  const [customGemInput, setCustomGemInput] = useState('');
+  const [manualGems, setManualGems] = useState<string[]>([]);
 
   // Choice mode for route suggestions (Choice 1: Famous + Hidden vs Choice 2: 100% Hidden)
   const [expeditionChoice, setExpeditionChoice] = useState<'mixed' | 'hidden'>('mixed');
@@ -114,11 +117,28 @@ export const RoutesScreen: React.FC<RoutesScreenProps> = ({
     setIsFindingGems(true);
     setSuggestedGems(null);
     setTimeout(() => {
-      const activeList = expeditionChoice === 'mixed' ? CHOICE_1_FAMOUS_HIDDEN : CHOICE_2_PURE_HIDDEN;
+      const isDefault = travelTo.toLowerCase().includes('goa');
+      let baseList1 = [...CHOICE_1_FAMOUS_HIDDEN];
+      let baseList2 = [...CHOICE_2_PURE_HIDDEN];
+      
+      if (!isDefault) {
+         // Shuffle to simulate dynamic waypoints for other destinations
+         baseList1.sort(() => Math.random() - 0.5);
+         baseList2.sort(() => Math.random() - 0.5);
+      }
+      
+      const activeList = expeditionChoice === 'mixed' ? baseList1 : baseList2;
       setSuggestedGems(activeList);
       setIsFindingGems(false);
       onShowToast(`Generated 5 suggested stops for your route! ✨`, 'diamond');
     }, 1500);
+  };
+
+  const handleAddManualGem = () => {
+    if (!customGemInput.trim()) return;
+    setManualGems([...manualGems, customGemInput.trim()]);
+    onShowToast(`Added custom gem: ${customGemInput}`, 'add_circle');
+    setCustomGemInput('');
   };
 
   const currentDisplayedGems = expeditionChoice === 'mixed' ? CHOICE_1_FAMOUS_HIDDEN : CHOICE_2_PURE_HIDDEN;
@@ -269,6 +289,67 @@ export const RoutesScreen: React.FC<RoutesScreenProps> = ({
             />
           </div>
         </div>
+        
+        {/* Budget and Custom Gem Inputs */}
+        <div className="grid grid-cols-2 gap-2.5">
+          <div className="flex flex-col gap-1">
+            <label className="text-[10px] font-bold text-[#3d4947] uppercase tracking-wider flex items-center gap-1">
+              <span className="material-symbols-outlined text-[13px] text-[#00685f]">payments</span>
+              Budget (₹)
+            </label>
+            <input
+              type="number"
+              value={budget}
+              onChange={(e) => setBudget(e.target.value)}
+              placeholder="Optional"
+              className="bg-white border border-[#dee8ff] rounded-xl px-3 py-2.5 text-xs font-semibold text-[#111c2d] placeholder:text-[#a0aca9] outline-none focus:border-[#4648d4] focus:ring-2 focus:ring-[#4648d4]/20 transition-all"
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-[10px] font-bold text-[#3d4947] uppercase tracking-wider flex items-center gap-1">
+              <span className="material-symbols-outlined text-[13px] text-[#fd6b36]">add_location</span>
+              Add Custom Gem/Source
+            </label>
+            <div className="flex relative">
+              <input
+                type="text"
+                value={customGemInput}
+                onChange={(e) => setCustomGemInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleAddManualGem()}
+                placeholder="e.g. My Secret Spot"
+                className="w-full bg-white border border-[#dee8ff] rounded-xl pl-3 pr-10 py-2.5 text-xs font-semibold text-[#111c2d] placeholder:text-[#a0aca9] outline-none focus:border-[#4648d4] focus:ring-2 focus:ring-[#4648d4]/20 transition-all"
+              />
+              <button
+                type="button"
+                onClick={handleAddManualGem}
+                className="absolute right-1 top-1 bottom-1 aspect-square bg-[#4648d4] text-white rounded-lg flex items-center justify-center hover:bg-[#6063ee] active:scale-95 transition-all"
+              >
+                <span className="material-symbols-outlined text-[16px]">add</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Display Manual Gems */}
+        {manualGems.length > 0 && (
+          <div className="flex flex-wrap gap-2 mt-1">
+            {manualGems.map((mg, i) => (
+              <div key={i} className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-[#c0c1ff] rounded-full shadow-sm text-xs font-semibold text-[#4648d4]">
+                <span className="material-symbols-outlined text-[14px]">push_pin</span>
+                {mg}
+                <button
+                   onClick={() => {
+                     setManualGems(manualGems.filter((_, idx) => idx !== i));
+                     onShowToast(`Removed ${mg}`, 'delete');
+                   }}
+                   className="text-[#a0aca9] hover:text-[#fd6b36] transition-colors ml-1"
+                >
+                  <span className="material-symbols-outlined text-[14px]">close</span>
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Travel Style Pills */}
         <div className="flex flex-col gap-1.5">
