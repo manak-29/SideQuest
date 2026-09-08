@@ -574,7 +574,7 @@ export const RoutesScreen: React.FC<RoutesScreenProps> = ({
                   Origin Point
                 </span>
                 <span className="font-headline text-xs sm:text-sm font-bold text-[#111c2d] truncate">
-                  Bengaluru, Karnataka
+                  {travelFrom || 'Bengaluru, Karnataka'}
                 </span>
               </div>
               <span className="material-symbols-outlined text-[#00685f] text-[20px]">my_location</span>
@@ -607,6 +607,24 @@ export const RoutesScreen: React.FC<RoutesScreenProps> = ({
               </div>
             </div>
           ))}
+
+          {/* Destination Point */}
+          <div className="relative flex items-center gap-2">
+            <div className="absolute -left-7 top-2.5 w-6 h-6 rounded-full bg-[#ffe4e4] flex items-center justify-center text-[#ba1a1a]">
+              <span className="material-symbols-outlined text-[14px]">location_on</span>
+            </div>
+            <div className="flex-1 bg-[#fff0f0] rounded-xl px-3 py-2 flex items-center justify-between border border-[#ffdbdb]">
+              <div className="flex flex-col min-w-0">
+                <span className="text-[10px] text-[#ba1a1a] uppercase tracking-wider font-bold">
+                  Destination Point
+                </span>
+                <span className="font-headline text-xs sm:text-sm font-bold text-[#111c2d] truncate">
+                  {travelTo || 'Goa, India'}
+                </span>
+              </div>
+              <span className="material-symbols-outlined text-[#ba1a1a] text-[20px]">flag</span>
+            </div>
+          </div>
 
           {/* Add Stop Button */}
           <button
@@ -658,11 +676,11 @@ export const RoutesScreen: React.FC<RoutesScreenProps> = ({
               Expedition Budget
             </span>
             <span className="text-xs text-[#ac3400] font-bold">
-              {budgetTier === 'backpacker'
+              {budget ? `₹${budget}` : (budgetTier === 'backpacker'
                 ? '₹7,000 – ₹12,000'
                 : budgetTier === 'moderate'
                 ? '₹15,000 – ₹25,000'
-                : '₹35,000 – ₹60,000'}
+                : '₹35,000 – ₹60,000')}
             </span>
           </div>
 
