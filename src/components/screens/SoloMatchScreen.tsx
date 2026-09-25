@@ -3,6 +3,7 @@ import { motion, AnimatePresence, useMotionValue, useTransform } from 'motion/re
 import confetti from 'canvas-confetti';
 import { AppScreen, SoloPeer } from '../../types';
 import { SOLO_PEERS } from '../../data/mockData';
+import { scoreMatch, MatchUser } from '../../api';
 import { GsapTextHighlight } from '../GsapTextHighlight';
 import { GsapInteractiveText } from '../GsapInteractiveText';
 import { GsapCounter } from '../GsapCounter';
@@ -30,7 +31,7 @@ export const SoloMatchScreen: React.FC<SoloMatchScreenProps> = ({
 
   const currentPeer = SOLO_PEERS[peerIndex % SOLO_PEERS.length];
 
-  const handleConnect = (peer: SoloPeer) => {
+  const handleConnect = async (peer: SoloPeer) => {
     // Fire confetti celebration
     try {
       confetti({
@@ -43,8 +44,38 @@ export const SoloMatchScreen: React.FC<SoloMatchScreenProps> = ({
       // ignore
     }
 
-    setMatchedPeer(peer);
-    onShowToast(`Connected with ${peer.name}!`, 'favorite');
+    // Live compatibility score from the trained matchmaking model
+    let scoredPeer = peer;
+    try {
+      const roamer: MatchUser = {
+        age: 25,
+        city: 'Bangalore, Karnataka',
+        interests: ['travel', 'outdoors', 'music', 'food', 'fitness'],
+        languages: ['english', 'hindi'],
+        drinks: 'rarely',
+        smokes: 'no',
+        height: 66,
+        essay_cosine: 0.3,
+      };
+      const candidate: MatchUser = {
+        age: peer.age,
+        city: peer.location.includes('Coorg') ? 'Mysore, Karnataka' : 'Bangalore, Karnataka',
+        interests: peer.sharedPassions.map((p) => p.replace('#', '').toLowerCase()),
+        languages: ['english', 'hindi'],
+        height: 69,
+        essay_cosine: 0.3,
+      };
+      const result = await scoreMatch(roamer, candidate);
+      scoredPeer = {
+        ...peer,
+        matchScore: Math.max(1, Math.min(99, Math.round(result.match_score))),
+      };
+    } catch {
+      // offline: keep mock score
+    }
+
+    setMatchedPeer(scoredPeer);
+    onShowToast(`Connected with ${scoredPeer.name}!`, 'favorite');
   };
 
   const x = useMotionValue(0);

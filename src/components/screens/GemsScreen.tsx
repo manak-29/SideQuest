@@ -1,8 +1,9 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { AppScreen, HiddenGem } from '../../types';
 import { ASSETS } from '../../data/mockData';
 import { getAllGems } from '../../data/gemStore';
+import { fetchHiddenGems, ragSearch } from '../../api';
 import { GsapTextHighlight } from '../GsapTextHighlight';
 import { GsapInteractiveText } from '../GsapInteractiveText';
 import { GsapCounter } from '../GsapCounter';
@@ -27,6 +28,39 @@ export const GemsScreen: React.FC<GemsScreenProps> = ({
   const [isSubmitModalOpen, setIsSubmitModalOpen] = useState(false);
   const [submitForm, setSubmitForm] = useState({ name: '', category: 'Waterfall', desc: '' });
 
+  // Live model gems + RAG semantic results (fallback: local gemStore)
+  const [modelGems, setModelGems] = useState<HiddenGem[]>([]);
+  const [ragGems, setRagGems] = useState<HiddenGem[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchHiddenGems(24)
+      .then((gems) => {
+        if (!cancelled && gems.length) setModelGems(gems);
+      })
+      .catch(() => {
+        /* offline: local store still renders */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // RAG semantic search (debounced) — vector search over 102,810 India places
+  useEffect(() => {
+    const q = searchQuery.trim();
+    if (q.length < 3) {
+      setRagGems([]);
+      return;
+    }
+    const t = setTimeout(() => {
+      ragSearch(q, 6)
+        .then(setRagGems)
+        .catch(() => setRagGems([]));
+    }, 450);
+    return () => clearTimeout(t);
+  }, [searchQuery]);
+
   const filterOptions = [
     'All (42)',
     'Nature & Waterfalls',
@@ -37,11 +71,18 @@ export const GemsScreen: React.FC<GemsScreenProps> = ({
   ];
 
   const filteredGems = useMemo(() => {
-    return getAllGems().filter((gem) => {
+    const seen = new Set<string>();
+    const pool = [...ragGems, ...modelGems, ...getAllGems()].filter((g) => {
+      if (seen.has(g.id)) return false;
+      seen.add(g.id);
+      return true;
+    });
+    return pool.filter((gem) => {
       const matchesSearch =
         gem.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         gem.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        gem.tags.some((t) => t.toLowerCase().includes(searchQuery.toLowerCase()));
+        gem.tags.some((t) => t.toLowerCase().includes(searchQuery.toLowerCase())) ||
+        (ragGems.length > 0 && ragGems.includes(gem)); // semantic hits pass search
 
       if (!matchesSearch) return false;
 
@@ -49,13 +90,13 @@ export const GemsScreen: React.FC<GemsScreenProps> = ({
       if (selectedFilter === 'Nature & Waterfalls')
         return gem.category.includes('Nature') || gem.tags.includes('Waterfall') || gem.tags.includes('Spring');
       if (selectedFilter === 'Heritage & Ruins') return gem.category.includes('Heritage');
-      if (selectedFilter === 'Secret Cafés') return gem.category.includes('Culinary');
+      if (selectedFilter === 'Secret Cafés') return gem.category.includes('Culinary') || gem.category.includes('Caf');
       if (selectedFilter === 'Night Treks') return gem.category.includes('Nightlife');
       if (selectedFilter === 'Wellness') return gem.tags.includes('Spring') || gem.category.includes('Nature');
 
       return true;
     });
-  }, [searchQuery, selectedFilter]);
+  }, [searchQuery, selectedFilter, modelGems, ragGems]);
 
   const toggleSaveGem = (id: string) => {
     setSavedGems((prev) => {

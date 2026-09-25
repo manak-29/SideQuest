@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
-import { motion } from 'motion/react';
-import { AppScreen } from '../../types';
+import React, { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { ASSETS, TRENDING_GEMS } from '../../data/mockData';
+import { fetchHiddenGems } from '../../api';
 import { GsapTextHighlight } from '../GsapTextHighlight';
 import { GsapInteractiveText } from '../GsapInteractiveText';
 import { GsapCounter } from '../GsapCounter';
@@ -19,6 +19,22 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 }) => {
   const [isMapExpanded, setIsMapExpanded] = useState(false);
   const [selectedGemModal, setSelectedGemModal] = useState<any | null>(null);
+  const [trendingGems, setTrendingGems] = useState<any[]>(TRENDING_GEMS);
+
+  // Live hidden gems from the trained India model (fallback: static mock)
+  useEffect(() => {
+    let cancelled = false;
+    fetchHiddenGems(6)
+      .then((gems) => {
+        if (!cancelled && gems.length) setTrendingGems(gems);
+      })
+      .catch(() => {
+        /* keep mock fallback offline */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
     <div className="flex flex-col w-full max-w-md md:max-w-2xl lg:max-w-4xl mx-auto px-4 space-y-5 pt-2 pb-24">
@@ -268,7 +284,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 
         {/* Carousel Container */}
         <div className="flex gap-3 overflow-x-auto pb-2 -mx-4 px-4 no-scrollbar snap-x snap-mandatory">
-          {TRENDING_GEMS.map((gem) => (
+          {trendingGems.map((gem) => (
             <div
               key={gem.id}
               className="snap-start min-w-[260px] w-[260px] rounded-2xl bg-white overflow-hidden shadow-[0_2px_16px_rgba(0,0,0,0.06)] border border-[#e7eeff] flex flex-col hover:shadow-lg transition-shadow"

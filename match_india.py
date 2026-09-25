@@ -337,6 +337,24 @@ def train_matchmaking() -> dict:
 
     logger.info(f"  splits: train={len(X_tr)} val={len(X_va)} test={len(X_te)}")
 
+    # Robustness masking (train only): real demo users rarely fill diet/religion/
+    # education/etc, so all-zero flag rows must be in-distribution. Model learns
+    # to fall back to essay cosine + interests + city when lifestyle fields missing.
+    X_tr_full = X_tr.copy()
+    MASK_COLS = ["diet", "drinks", "smokes", "religion", "education", "ethnicity"]
+    rng = np.random.default_rng(SEED)
+    mode = rng.random(len(X_tr))
+    drop = np.zeros((len(X_tr), len(MASK_COLS)), dtype=bool)
+    drop[mode < 0.15] = True  # 15%: ALL lifestyle flags hidden
+    partial = (mode >= 0.15) & (mode < 0.40)
+    drop[partial] = rng.random((int(partial.sum()), len(MASK_COLS))) < 0.45  # 25%: subset hidden
+    arr = X_tr.to_numpy(copy=True)
+    for k, c in enumerate(MASK_COLS):
+        arr[drop[:, k], X_tr.columns.get_loc(f"same_{c}")] = 0.0
+        arr[drop[:, k], X_tr.columns.get_loc(f"{c}_known")] = 0.0
+    X_tr = pd.DataFrame(arr, columns=X_tr.columns, index=X_tr.index)
+    logger.info(f"  masked lifestyle flags on {int(drop.any(axis=1).sum())}/{len(X_tr)} train rows")
+
     logger.info("  training XGBClassifier (early stopping on val)...")
     clf = XGBClassifier(
         n_estimators=2000, max_depth=6, learning_rate=0.05,
@@ -376,12 +394,12 @@ def train_matchmaking() -> dict:
     )
     gt_pred = reg.predict(X_te)
 
-    # train-vs-test gap (anti-overfit check)
-    proba_tr = _proba(clf, X_tr)
+    # train-vs-test gap (anti-overfit check; full-info train copy for fair gap)
+    proba_tr = _proba(clf, X_tr_full)
     train_acc = float(accuracy_score(y_tr, (proba_tr >= 0.5).astype(int)))
     test_acc = float(accuracy_score(y_te, pred))
     acc_gap = train_acc - test_acc
-    gt_pred_tr = reg.predict(X_tr)
+    gt_pred_tr = reg.predict(X_tr_full)
     train_r2 = float(r2_score(gt_tr, gt_pred_tr))
     test_r2 = float(r2_score(gt_te, gt_pred))
     r2_gap = train_r2 - test_r2

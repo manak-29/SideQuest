@@ -47,13 +47,17 @@ app.get("/api/health", (_req, res) => {
 });
 
 // Helper: Run Python ML inference script
-async function runMLInference(script: string, args: string[]): Promise<any> {
+async function runMLInference(script: string, args: string[], fromRoot = false): Promise<any> {
   try {
-    const { stdout, stderr } = await execFileAsync(PYTHON, [path.join(SRC_DIR, script), ...args], {
-      timeout: 30000,
+    const scriptPath = fromRoot
+      ? path.join("D:/sidequest_model", script)
+      : path.join(SRC_DIR, script);
+    const { stdout, stderr } = await execFileAsync(PYTHON, ["-X", "utf8", scriptPath, ...args], {
+      timeout: 60000,
       encoding: "utf-8",
+      maxBuffer: 10 * 1024 * 1024,
     });
-    if (stderr) console.error(`ML stderr:`, stderr);
+    if (stderr) console.error(`ML stderr:`, stderr.slice(0, 500));
     return JSON.parse(stdout);
   } catch (err: any) {
     console.error(`ML inference error (${script}):`, err.message);
@@ -64,14 +68,15 @@ async function runMLInference(script: string, args: string[]): Promise<any> {
 // API: Analyze a place using trained ML models
 app.post("/api/ml/analyze-place", async (req, res) => {
   try {
-    const { name, category, latitude, longitude, reviewCount, rating, priceRange, distanceKm } = req.body;
+    const { name, category, latitude, longitude, reviewCount, rating, priceRange, distanceKm, city } = req.body;
 
     const result = await runMLInference("inference.py", [
       "--mode", "analyze",
       "--name", name || "Unknown",
-      "--category", category || "Nature",
-      "--lat", String(latitude || 15.5),
-      "--lng", String(longitude || 73.8),
+      "--category", category || "",
+      "--city", city || "",
+      "--lat", String(latitude || 19.07),
+      "--lng", String(longitude || 72.87),
       "--reviews", String(reviewCount || 50),
       "--rating", String(rating || 4.5),
       "--price", String(priceRange || 2),
@@ -109,18 +114,57 @@ app.post("/api/ml/verify-collaborator", async (req, res) => {
 // API: Get hidden gems from the trained model
 app.get("/api/ml/hidden-gems", async (req, res) => {
   try {
-    const { limit, minScore, category } = req.query;
+    const { limit, minScore, category, city } = req.query;
 
     const result = await runMLInference("inference.py", [
       "--mode", "gems",
-      "--limit", String(limit || 10),
-      "--min-score", String(minScore || 8.0),
+      "--limit", String(limit || 12),
+      "--min-score", String(minScore || 60),
       "--category", String(category || ""),
+      "--city", String(city || ""),
     ]);
 
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: "ML gems retrieval failed", details: err });
+  }
+});
+
+// API: RAG semantic search over 102,810 India places (vector store)
+app.post("/api/rag/search", async (req, res) => {
+  try {
+    const { query, city, topK } = req.body;
+    if (!query) {
+      res.status(400).json({ error: "query is required" });
+      return;
+    }
+    const result = await runMLInference("rag_search.py", [
+      "--query", String(query),
+      "--top-k", String(topK || 5),
+      "--city", String(city || ""),
+    ], true);
+    res.json({ success: true, ...result });
+  } catch (err) {
+    res.status(500).json({ error: "RAG search failed", details: err });
+  }
+});
+
+// API: Solo matchmaking (hybrid model on 59K Indianized profiles)
+app.post("/api/ml/match", async (req, res) => {
+  try {
+    const { userA, userB } = req.body;
+    if (!userA || !userB) {
+      res.status(400).json({ error: "userA and userB are required" });
+      return;
+    }
+    const result = await runMLInference("inference.py", [
+      "--mode", "match",
+      "--user-a", JSON.stringify(userA),
+      "--user-b", JSON.stringify(userB),
+    ]);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: "Matchmaking failed", details: err });
   }
 });
 
@@ -143,29 +187,40 @@ app.post("/api/ml/detect-fake-reviews", async (req, res) => {
   }
 });
 
-// API: Combined analysis (Gemini + ML)
+// API: Combined analysis (ML + RAG context + Gemini availability)
 app.post("/api/analyze", async (req, res) => {
   try {
-    const { name, category, description, latitude, longitude, reviewCount, rating, priceRange, distanceKm } = req.body;
+    const { name, category, description, latitude, longitude, reviewCount, rating, priceRange, distanceKm, city } = req.body;
 
-    // Run ML analysis in parallel with Gemini if available
+    // Run ML analysis and RAG retrieval in parallel
     const mlPromise = runMLInference("inference.py", [
       "--mode", "analyze",
       "--name", name || "Unknown",
-      "--category", category || "Nature",
-      "--lat", String(latitude || 15.5),
-      "--lng", String(longitude || 73.8),
+      "--category", category || "",
+      "--city", city || "",
+      "--lat", String(latitude || 19.07),
+      "--lng", String(longitude || 72.87),
       "--reviews", String(reviewCount || 50),
       "--rating", String(rating || 4.5),
       "--price", String(priceRange || 2),
       "--distance", String(distanceKm || 10),
-    ]).catch(() => null);
+    ]).catch((e) => ({ success: false, error: String(e?.message || e) }));
 
-    const mlResult = await mlPromise;
+    const ragQuery = [name, category, description].filter(Boolean).join(" ");
+    const ragPromise = ragQuery
+      ? runMLInference("rag_search.py", [
+          "--query", ragQuery,
+          "--top-k", "5",
+          "--city", city || "",
+        ], true).catch(() => ({ results: [] }))
+      : Promise.resolve({ results: [] });
+
+    const [mlResult, ragResult] = await Promise.all([mlPromise, ragPromise]);
 
     res.json({
       success: true,
       mlAnalysis: mlResult,
+      ragContext: ragResult,
       geminiAvailable: Boolean(process.env.GEMINI_API_KEY),
     });
   } catch (err) {

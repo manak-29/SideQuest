@@ -425,18 +425,199 @@ def verify_collaborator(collaborator_data: pd.DataFrame,
     return engine.verify_collaborator(collaborator_data)
 
 
+# ---------------------------------------------------------------------------
+# India inference context: real aggregates from the training data (cached)
+# ---------------------------------------------------------------------------
+_CONTEXT = None
+
+
+def get_india_context() -> Dict:
+    """Load feature medians + per-city stats from india_places.csv (once)."""
+    global _CONTEXT
+    if _CONTEXT is not None:
+        return _CONTEXT
+
+    csv_path = Path("D:/sidequest_model/data/india_places.csv")
+    usecols = ["city", "stars", "review_count", "price_level", "cost_inr",
+               "competitor_density", "area_business_count", "dist_from_center",
+               "category_rarity", "city_avg_rating", "city_avg_reviews",
+               "city_business_count", "violent_crime_rate", "property_crime_rate",
+               "hospital_distance", "police_distance"]
+    if csv_path.exists():
+        df = pd.read_csv(csv_path, usecols=usecols)
+        ctx = {
+            "global": {
+                "price_level": float(df["price_level"].median()),
+                "cost_inr": float(df["cost_inr"].median()),
+                "competitor_density": float(df["competitor_density"].median()),
+                "area_business_count": float(df["area_business_count"].median()),
+                "dist_from_center": float(df["dist_from_center"].median()),
+                "category_rarity": float(df["category_rarity"].median()),
+                "city_avg_rating": float(df["stars"].mean()),
+                "city_avg_reviews": float(df["review_count"].median()),
+                "city_business_count": float(df["city_business_count"].median()),
+                "violent_crime_rate": float(df["violent_crime_rate"].median()),
+                "property_crime_rate": float(df["property_crime_rate"].median()),
+                "hospital_distance": float(df["hospital_distance"].median()),
+                "police_distance": float(df["police_distance"].median()),
+                "review_count": float(df["review_count"].median()),
+            },
+            "cities": {},
+        }
+        g = df.groupby("city").agg(
+            city_avg_rating=("stars", "mean"),
+            city_avg_reviews=("review_count", "median"),
+            city_business_count=("city_business_count", "median"),
+            violent_crime_rate=("violent_crime_rate", "median"),
+            property_crime_rate=("property_crime_rate", "median"),
+        ).round(3)
+        ctx["cities"] = g.to_dict("index")
+    else:
+        ctx = {"global": {}, "cities": {}}
+    _CONTEXT = ctx
+    return ctx
+
+
+def build_india_features(args) -> pd.DataFrame:
+    """Build a COMPLETE India feature row covering all 3 unified tasks."""
+    ctx = get_india_context()["global"]
+    g = ctx  # shorthand; defaults if CSV missing
+    city_stats = get_india_context()["cities"].get(
+        str(getattr(args, "city", "") or ""), {})
+
+    def pick(key, default):
+        return float(city_stats.get(key, g.get(key, default)))
+
+    stars = float(args.rating)
+    reviews = int(args.reviews)
+    review_count_log = float(np.log1p(reviews))
+    city_avg_rating = pick("city_avg_rating", 3.7)
+    city_avg_reviews = max(pick("city_avg_reviews", 50.0), 1.0)
+    is_mainstream = 1 if reviews > 200 else 0
+    has_infra = 1
+    hosp_d = pick("hospital_distance", 3.0)
+    pol_d = pick("police_distance", 3.0)
+
+    return pd.DataFrame([{
+        "name": args.name,
+        "category": args.category,
+        # common
+        "stars": stars,
+        "review_count": reviews,
+        "review_count_log": review_count_log,
+        "price_level": float(args.price),
+        "category_count": 1,
+        "is_sweet_spot": 1 if 3.5 <= stars <= 4.5 else 0,
+        "is_budget_friendly": 1 if args.price <= 2 else 0,
+        # hidden_gem
+        "latitude": float(args.lat),
+        "longitude": float(args.lng),
+        "cost_inr": float(getattr(args, "cost_inr", 0) or pick("cost_inr", 300.0)),
+        "is_mainstream": is_mainstream,
+        "is_tourist_trap": 1 if reviews > 1000 else 0,
+        "competitor_density": pick("competitor_density", 0.3),
+        "area_business_count": pick("area_business_count", 40.0),
+        "dist_from_center": float(getattr(args, "distance", 10.0)),
+        "category_rarity": pick("category_rarity", 0.5),
+        "has_reviews": 1 if reviews > 0 else 0,
+        "is_open": 1,
+        "source_swiggy": 0,
+        "city_avg_rating": city_avg_rating,
+        "city_avg_reviews": city_avg_reviews,
+        "city_business_count": pick("city_business_count", 100.0),
+        "rating_vs_city": stars - city_avg_rating,
+        "review_ratio_vs_city": reviews / city_avg_reviews,
+        "has_phone": int(getattr(args, "has_phone", 1)),
+        "has_online_order": int(getattr(args, "has_online_order", 1)),
+        "has_book_table": int(getattr(args, "has_book_table", 0)),
+        # safety_score
+        "hospital_distance": hosp_d,
+        "police_distance": pol_d,
+        "has_hospital_nearby": 1 if hosp_d <= 2.0 else 0,
+        "has_police_nearby": 1 if pol_d <= 2.0 else 0,
+        "has_infra_data": has_infra,
+        "violent_crime_rate": pick("violent_crime_rate", 15.0),
+        "property_crime_rate": pick("property_crime_rate", 8.0),
+        # collaboration_auth (new listing: no parsed review stats yet -> neutral)
+        "rev_n": 0.0,
+        "rev_stars_mean": 0.0,
+        "rev_stars_std": 0.0,
+        "rev_rating_mismatch": 0.0,
+        "rev_avg_words": 0.0,
+    }])
+
+
+def convert_numpy(obj):
+    if isinstance(obj, (np.floating, np.integer)):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, dict):
+        return {k: convert_numpy(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_numpy(i) for i in obj]
+    return obj
+
+
+def run_fake_detection(text: str, rating: float) -> Dict:
+    """Real text model: models/fake_detection.pkl (TF-IDF + 17 linguistic)."""
+    import joblib
+    import sys as _sys
+    _sys.path.insert(0, "D:/sidequest_model")
+    from fake_features import FEATURE_COLS, review_features  # type: ignore
+
+    bundle = joblib.load("D:/sidequest_model/models/fake_detection.pkl")
+    clf, char_vec, word_vec = bundle["clf"], bundle["char_vec"], bundle["word_vec"]
+
+    from scipy.sparse import csr_matrix, hstack
+    X_char = char_vec.transform([text])
+    X_word = word_vec.transform([text])
+    feats = review_features(text, rating)
+    X_ling = np.array([[feats[c] for c in FEATURE_COLS]], dtype=float)
+    X = hstack([X_char, X_word, csr_matrix(X_ling)]).tocsr()
+
+    p_fake = float(clf.predict_proba(X)[0, 1])
+    is_fake = p_fake >= 0.5
+    return {
+        "is_fake": bool(is_fake),
+        "confidence": round(p_fake if is_fake else 1 - p_fake, 4),
+        "p_fake": round(p_fake, 4),
+        "linguistic_features": {k: feats[k] for k in
+                                ["char_count", "word_count", "exclamation_count",
+                                 "uppercase_word_count", "unique_word_ratio",
+                                 "superlative_count"]},
+        "recommendation": "Reject" if is_fake else "Accept",
+        "model": "char+word TF-IDF + 17 linguistic features (acc 95.4%)",
+    }
+
+
+def run_match(user_a_json: str, user_b_json: str) -> Dict:
+    """Matchmaking inference: models/matchmaking.pkl (hybrid 20-feature)."""
+    import joblib
+    import sys as _sys
+    _sys.path.insert(0, "D:/sidequest_model")
+    from match_india import score_pair  # type: ignore
+
+    bundle = joblib.load("D:/sidequest_model/models/matchmaking.pkl")
+    a = json.loads(user_a_json)
+    b = json.loads(user_b_json)
+    result = score_pair(bundle, a, b)
+    return {"success": True, **result}
+
+
 # CLI interface for Express server integration
 if __name__ == "__main__":
     import argparse
     import sys
-    
+
     parser = argparse.ArgumentParser(description="SideQuest ML Inference CLI")
-    parser.add_argument("--mode", required=True, 
-                       choices=["analyze", "verify", "gems", "fake-detect"],
-                       help="Inference mode")
+    parser.add_argument("--mode", required=True,
+                        choices=["analyze", "verify", "gems", "fake-detect", "match"],
+                        help="Inference mode")
     parser.add_argument("--name", default="Unknown", help="Place name")
-    parser.add_argument("--category", default="Nature", help="Place category")
+    parser.add_argument("--category", default="", help="Place category filter (gems mode)")
     parser.add_argument("--description", default="", help="Place description")
+    parser.add_argument("--city", default="", help="City (improves context stats)")
     parser.add_argument("--lat", type=float, default=15.5, help="Latitude")
     parser.add_argument("--lng", type=float, default=73.8, help="Longitude")
     parser.add_argument("--reviews", type=int, default=50, help="Review count")
@@ -447,103 +628,25 @@ if __name__ == "__main__":
     parser.add_argument("--user-reviews", type=int, default=10, help="User review count")
     parser.add_argument("--biz-reviews", type=int, default=100, help="Business review count")
     parser.add_argument("--limit", type=int, default=10, help="Max results for gems")
-    parser.add_argument("--min-score", type=float, default=8.0, help="Min gem score")
-    
+    parser.add_argument("--min-score", type=float, default=60.0,
+                        help="Min gem score (0-100; values<10 treated as 0-10 scale)")
+    parser.add_argument("--user-a", default="{}", help="User A JSON (match mode)")
+    parser.add_argument("--user-b", default="{}", help="User B JSON (match mode)")
+
     args = parser.parse_args()
-    
+
     try:
+        if args.mode == "match":
+            output = run_match(args.user_a, args.user_b)
+            print(json.dumps(output))
+            sys.exit(0)
+
         engine = SideQuestInference()
-        
+
         if args.mode == "analyze":
-            # Create place data with all required features
-            review_count_log = np.log1p(args.reviews)
-            is_sweet_spot = 1 if 3.5 <= args.rating <= 4.5 else 0
-            is_budget_friendly = 1 if args.price <= 2 else 0
-            has_reviews = 1 if args.reviews > 0 else 0
-            is_open = 1
-            category_count = 1
-            
-            place_data = pd.DataFrame([{
-                "name": args.name,
-                "category": args.category,
-                "latitude": args.lat,
-                "longitude": args.lng,
-                "review_count": args.reviews,
-                "rating": args.rating,
-                "price_level": args.price,
-                "distance_km": args.distance,
-                # Hidden gem features
-                "review_count_log": review_count_log,
-                "category_count": category_count,
-                "is_sweet_spot": is_sweet_spot,
-                "is_budget_friendly": is_budget_friendly,
-                "has_reviews": has_reviews,
-                "is_open": is_open,
-                "is_mainstream": 0,
-                "is_tourist_trap": 0,
-                "review_text_mean_len": 50.0,
-                "review_text_max_len": 100.0,
-                "review_text_mean_words": 8.0,
-                "review_exclamation_mean": 0.1,
-                "review_uppercase_mean": 0.05,
-                "review_useful_sum": args.reviews * 0.3,
-                "review_funny_sum": args.reviews * 0.1,
-                "review_cool_sum": args.reviews * 0.2,
-                "review_votes_total": args.reviews * 0.6,
-                "has_wifi": 1,
-                "has_parking": 1,
-                "hours_per_week": 60.0,
-                "city_avg_rating": 4.0,
-                "city_avg_reviews": 100.0,
-                "city_business_count": 50.0,
-                "rating_vs_city": args.rating - 4.0,
-                "review_ratio_vs_city": args.reviews / 100.0,
-                # Safety features
-                "pharmacy_distance": 2.0,
-                "hospital_distance": 5.0,
-                "has_pharmacy_nearby": 1,
-                "has_hospital_nearby": 1,
-                "violent_crime_rate": 0.02,
-                "property_crime_rate": 0.05,
-                # Collaboration auth features
-                "has_business_registration": 1,
-                "has_phone": 1,
-                "has_email": 1,
-                "has_website": 1,
-                "has_instagram": 1,
-                "has_facebook": 1,
-                "instagram_followers": 500,
-                "facebook_likes": 300,
-                "social_media_age_days": 365,
-                "has_unique_photos": 1,
-                "platform_count": 3,
-                "on_google_maps": 1,
-                "on_yelp": 1,
-                "on_tripadvisor": 1,
-                "total_reviews": args.reviews,
-                "avg_rating": args.rating,
-                "review_velocity": args.reviews / 12.0,
-                "by_appointment": 0,
-                "competitor_density": np.random.uniform(0.1, 0.9),
-                "geographic_isolation": np.random.uniform(0.3, 0.95),
-                "category_rarity": np.random.uniform(0.2, 0.8),
-                "women_safety_index": np.random.uniform(0.6, 0.95),
-                "solo_traveler_rating": np.random.uniform(0.5, 0.9),
-            }])
-            
+            place_data = build_india_features(args)
             result = engine.analyze_place(place_data)
-            
-            def convert_numpy(obj):
-                if isinstance(obj, (np.floating, np.integer)):
-                    return float(obj)
-                elif isinstance(obj, np.ndarray):
-                    return obj.tolist()
-                elif isinstance(obj, dict):
-                    return {k: convert_numpy(v) for k, v in obj.items()}
-                elif isinstance(obj, list):
-                    return [convert_numpy(i) for i in obj]
-                return obj
-            
+
             output = {
                 "success": True,
                 "place_id": str(result.place_id),
@@ -558,132 +661,68 @@ if __name__ == "__main__":
                 "confidence": float(result.confidence),
                 "details": convert_numpy(result.details),
             }
-        
+
         elif args.mode == "verify":
-            collab_data = pd.DataFrame([{
-                "name": args.name,
-                "category": args.category,
-                "description": args.description,
-                "latitude": args.lat,
-                "longitude": args.lng,
-                "review_count": args.reviews,
-                "rating": args.rating,
-                "price_level": args.price,
-                "review_count_log": np.log1p(args.reviews),
-                "category_count": 1,
-                "is_sweet_spot": 1 if 3.5 <= args.rating <= 4.5 else 0,
-                "is_budget_friendly": 1 if args.price <= 2 else 0,
-                "has_reviews": 1 if args.reviews > 0 else 0,
-                "is_open": 1,
-                "is_mainstream": 0,
-                "is_tourist_trap": 0,
-                "review_text_mean_len": 50.0,
-                "review_text_max_len": 100.0,
-                "review_text_mean_words": 8.0,
-                "review_exclamation_mean": 0.1,
-                "review_uppercase_mean": 0.05,
-                "review_useful_sum": args.reviews * 0.3,
-                "review_funny_sum": args.reviews * 0.1,
-                "review_cool_sum": args.reviews * 0.2,
-                "review_votes_total": args.reviews * 0.6,
-                "has_wifi": 1,
-                "has_parking": 1,
-                "hours_per_week": 60.0,
-                "city_avg_rating": 4.0,
-                "city_avg_reviews": 100.0,
-                "city_business_count": 50.0,
-                "rating_vs_city": args.rating - 4.0,
-                "review_ratio_vs_city": args.reviews / 100.0,
-                "pharmacy_distance": 2.0,
-                "hospital_distance": 5.0,
-                "has_pharmacy_nearby": 1,
-                "has_hospital_nearby": 1,
-                "violent_crime_rate": 0.02,
-                "property_crime_rate": 0.05,
-                "has_business_registration": 1,
-                "has_phone": 1,
-                "has_email": 1,
-                "has_website": 1,
-                "has_instagram": 1,
-                "has_facebook": 1,
-                "instagram_followers": 500,
-                "facebook_likes": 300,
-                "social_media_age_days": 365,
-                "has_unique_photos": 1,
-                "platform_count": 3,
-                "on_google_maps": 1,
-                "on_yelp": 1,
-                "on_tripadvisor": 1,
-                "total_reviews": args.reviews,
-                "avg_rating": args.rating,
-                "review_velocity": args.reviews / 12.0,
-                "by_appointment": 0,
-                "competitor_density": np.random.uniform(0.1, 0.9),
-                "geographic_isolation": np.random.uniform(0.3, 0.95),
-                "category_rarity": np.random.uniform(0.2, 0.8),
-                "women_safety_index": np.random.uniform(0.6, 0.95),
-                "solo_traveler_rating": np.random.uniform(0.5, 0.9),
-            }])
-            
+            collab_data = build_india_features(args)
+            collab_data["description"] = args.description
             raw_output = engine.verify_collaborator(collab_data)
-            
-            def convert_numpy(obj):
-                if isinstance(obj, (np.floating, np.integer)):
-                    return float(obj)
-                elif isinstance(obj, np.ndarray):
-                    return obj.tolist()
-                elif isinstance(obj, dict):
-                    return {k: convert_numpy(v) for k, v in obj.items()}
-                elif isinstance(obj, list):
-                    return [convert_numpy(i) for i in obj]
-                return obj
-            
             output = convert_numpy(raw_output)
             output["success"] = True
-        
+
         elif args.mode == "gems":
-            # Load data and filter gems
-            data_path = Path("D:/sidequest_model/data/merged_places.csv")
-            if data_path.exists():
-                places_df = pd.read_csv(data_path, nrows=1000)
-                filtered = engine.filter_hidden_gems(places_df, min_score=args.min_score)
-                top_places = filtered.head(args.limit)
-                
-                gems = []
-                for _, row in top_places.iterrows():
-                    gems.append({
-                        "name": row.get("name", "Unknown"),
-                        "category": row.get("categories", "Nature"),
-                        "rating": float(row.get("rating", 4.5)),
-                        "review_count": int(row.get("review_count", 50)),
-                    })
-                
-                output = {"success": True, "gems": gems, "count": len(gems)}
+            # India data: predict in ONE batch, filter, top-N
+            data_path = Path("D:/sidequest_model/data/india_places.csv")
+            if not data_path.exists():
+                output = {"success": False, "error": "india_places.csv not found"}
             else:
-                output = {"success": False, "error": "Data file not found"}
-        
+                df = pd.read_csv(data_path, low_memory=False)
+                df["source_swiggy"] = (df["source"] == "swiggy").astype(int)
+                threshold = args.min_score
+                if threshold < 10:  # UI passes 0-10 scale -> convert to 0-100
+                    threshold = threshold * 10
+                scores = engine.model.predict(df, task="hidden_gem")
+                safety = engine.model.predict(df, task="safety_score")
+                df["_gem"] = scores
+                df["_safety"] = safety
+
+                mask = df["_gem"] >= threshold
+                if args.category:
+                    mask &= df["categories"].fillna("").str.contains(
+                        args.category, case=False, na=False)
+                filtered = df[mask].sort_values("_gem", ascending=False)
+                top = filtered.head(args.limit)
+
+                gems = []
+                for _, row in top.iterrows():
+                    gem = float(min(100.0, row["_gem"]))
+                    gems.append({
+                        "place_id": str(row["place_id"]),
+                        "name": str(row["name"]),
+                        "city": str(row["city"]),
+                        "category": str(row["primary_category"]),
+                        "cuisines": str(row["categories"])[:80],
+                        "rating": float(row["stars"]),
+                        "review_count": int(row["review_count"]),
+                        "hidden_gem_score": round(gem, 1),
+                        "gem_score_10": round(gem / 10.0, 1),
+                        "safety_score": round(float(row["_safety"]), 1),
+                        "price_level": float(row["price_level"]),
+                        "lat": float(row["latitude"]),
+                        "lng": float(row["longitude"]),
+                    })
+                output = {"success": True, "gems": gems, "count": len(gems),
+                          "threshold": threshold,
+                          "qualifying_total": int(mask.sum())}
+
         elif args.mode == "fake-detect":
-            # Simple fake detection based on text analysis
-            text = args.text.lower()
-            suspicious_words = ["fake", "bought", "paid", "incentive", "free product"]
-            suspicious_count = sum(1 for word in suspicious_words if word in text)
-            
-            is_fake = suspicious_count > 0 or args.rating > 4.8
-            confidence = min(0.95, 0.5 + suspicious_count * 0.15)
-            
-            output = {
-                "success": True,
-                "is_fake": is_fake,
-                "confidence": confidence,
-                "suspicious_words_found": suspicious_count,
-                "recommendation": "Reject" if is_fake else "Accept",
-            }
-        
+            output = run_fake_detection(args.text, args.rating)
+
         else:
             output = {"success": False, "error": f"Unknown mode: {args.mode}"}
-        
+
         print(json.dumps(output))
-    
+
     except Exception as e:
+        logger.exception("inference failed")
         print(json.dumps({"success": False, "error": str(e)}))
         sys.exit(1)
