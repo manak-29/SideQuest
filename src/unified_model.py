@@ -41,7 +41,12 @@ class ModelMetrics:
     auc_roc: float = 0.0
     rmse: float = 0.0
     r2: float = 0.0
-    
+    # anti-overfit: train-set scores + generalization gaps
+    train_accuracy: float = 0.0
+    train_r2: float = 0.0
+    accuracy_gap: float = 0.0
+    r2_gap: float = 0.0
+
     def to_dict(self) -> Dict:
         return {
             "accuracy": self.accuracy,
@@ -50,7 +55,11 @@ class ModelMetrics:
             "f1": self.f1,
             "auc_roc": self.auc_roc,
             "rmse": self.rmse,
-            "r2": self.r2
+            "r2": self.r2,
+            "train_accuracy": self.train_accuracy,
+            "train_r2": self.train_r2,
+            "accuracy_gap": self.accuracy_gap,
+            "r2_gap": self.r2_gap,
         }
 
 @dataclass 
@@ -102,89 +111,80 @@ class UnifiedSideQuestModel:
         }
     
     def _setup_task_configs(self) -> Dict[str, TaskConfig]:
-        """Define configurations for each task"""
-        
+        """Define configurations for each task (INDIA dataset columns)"""
+
         # Common features used across tasks
         common_features = [
-            "rating", "review_count", "review_count_log", "price_level",
-            "category_count", "photo_count", "has_photos",
-            "is_sweet_spot", "is_budget_friendly",
+            "stars", "review_count", "review_count_log", "price_level",
+            "category_count", "is_sweet_spot", "is_budget_friendly",
         ]
-        
+
         configs = {
             "hidden_gem": TaskConfig(
                 task_type="regression",
                 target_column="hidden_gem_score",
                 features=common_features + [
-                    "latitude", "longitude",
+                    "latitude", "longitude", "cost_inr",
                     "is_mainstream", "is_tourist_trap",
-                    "review_text_mean_len", "review_text_max_len", "review_text_mean_words",
-                    "review_exclamation_mean", "review_uppercase_mean",
-                    "review_useful_sum", "review_funny_sum", "review_cool_sum", "review_votes_total",
-                    "has_reviews", "is_open", "has_wifi", "has_parking",
-                    "hours_per_week",
+                    "competitor_density", "area_business_count",
+                    "dist_from_center", "category_rarity",
+                    "has_reviews", "is_open", "source_swiggy",
                     "city_avg_rating", "city_avg_reviews", "city_business_count",
                     "rating_vs_city", "review_ratio_vs_city",
+                    "has_phone", "has_online_order", "has_book_table",
                 ],
                 weight=0.30
             ),
-            
+
             "solo_matching": TaskConfig(
                 task_type="regression",
                 target_column="match_score",
-                features=common_features + [
-                    "user_age", "user_rating", "user_verified",
-                    "interest_overlap", "same_city", "language_count",
-                    "availability_days"
-                ],
+                # matchmaking trained separately (match_india.py -> matchmaking.pkl);
+                # listed here so predict_all skips when unified model absent
+                features=[],
                 weight=0.20
             ),
-            
+
             "fake_detection": TaskConfig(
                 task_type="classification",
                 target_column="is_fake",
-                features=[
-                    "text_length", "word_count", "avg_word_length",
-                    "sentence_count", "exclamation_count", "question_count",
-                    "comma_count", "uppercase_ratio",
-                    "fake_indicators_count", "real_indicators_count",
-                    "positive_words", "negative_words", "neutral_words",
-                    "unique_word_ratio", "has_numbers", "has_emojis",
-                    "rating"
-                ],
+                # text model trained separately (fake_features.py -> fake_detection.pkl)
+                features=[],
                 weight=0.20
             ),
-            
+
             "safety_score": TaskConfig(
                 task_type="regression",
                 target_column="safety_score",
                 features=common_features + [
-                    "has_reviews", "is_open",
-                    "pharmacy_distance", "hospital_distance",
-                    "has_pharmacy_nearby", "has_hospital_nearby",
+                    "has_reviews", "is_open", "dist_from_center",
+                    "competitor_density", "area_business_count",
+                    "hospital_distance", "police_distance",
+                    "has_hospital_nearby", "has_police_nearby",
+                    "has_infra_data",
                     "violent_crime_rate", "property_crime_rate",
                 ],
                 weight=0.15
             ),
-            
+
             "collaboration_auth": TaskConfig(
                 task_type="classification",
                 target_column="is_authentic",
+                # social/meta + review-set statistics (NO text verdicts -> no leakage)
                 features=[
-                    "has_business_registration", "has_phone", "has_email",
-                    "has_website", "has_instagram", "has_facebook",
-                    "instagram_followers", "facebook_likes",
-                    "social_media_age_days",
-                    "has_unique_photos", "platform_count",
-                    "on_google_maps", "on_yelp", "on_tripadvisor",
-                    "total_reviews", "avg_rating", "review_velocity",
-                    "has_wifi", "has_parking", "by_appointment",
-                    "hours_per_week", "is_open",
+                    "has_phone", "has_online_order", "has_book_table",
+                    "review_count", "review_count_log", "price_level",
+                    "stars", "category_count", "cost_inr",
+                    "competitor_density", "area_business_count",
+                    "city_business_count", "dist_from_center",
+                    "rating_vs_city", "review_ratio_vs_city",
+                    "rev_n", "rev_stars_mean", "rev_stars_std",
+                    "rev_rating_mismatch", "rev_avg_words",
                 ],
                 weight=0.15
             )
         }
-        
+
         return configs
     
     def _create_model(self, task_type: str, params: Dict = None) -> Any:
@@ -205,8 +205,10 @@ class UnifiedSideQuestModel:
                     reg_alpha=0.1,
                     reg_lambda=1.0,
                     random_state=self.config["random_state"],
-                    use_label_encoder=False,
-                    eval_metric="logloss"
+                    eval_metric="logloss",
+                    early_stopping_rounds=self.config.get("early_stopping_rounds", 30),
+                    **({"scale_pos_weight": params["scale_pos_weight"]}
+                       if "scale_pos_weight" in params else {}),
                 )
             else:
                 return RandomForestClassifier(
@@ -229,7 +231,8 @@ class UnifiedSideQuestModel:
                     gamma=0.1,
                     reg_alpha=0.1,
                     reg_lambda=1.0,
-                    random_state=self.config["random_state"]
+                    random_state=self.config["random_state"],
+                    early_stopping_rounds=self.config.get("early_stopping_rounds", 30),
                 )
             else:
                 return RandomForestRegressor(
@@ -485,45 +488,51 @@ class UnifiedSideQuestModel:
             X = X[valid_mask].reset_index(drop=True)
             y = y[valid_mask].reset_index(drop=True)
 
-            # Split data
-            X_train, X_test, y_train, y_test = train_test_split(
+            # Split data: 75/25 outer test split (unchanged), then carve
+            # validation set FROM train for early stopping (test stays clean)
+            X_train_full, X_test, y_train_full, y_test = train_test_split(
                 X, y, test_size=self.config["test_size"],
                 random_state=self.config["random_state"],
                 stratify=y if task_config.task_type == "classification" else None
             )
-            
-            # Create and train model
+            X_train, X_val, y_train, y_val = train_test_split(
+                X_train_full, y_train_full, test_size=0.2,
+                random_state=self.config["random_state"],
+                stratify=y_train_full if task_config.task_type == "classification" else None
+            )
+
+            # Create and train model (early stopping watches validation set)
             model = self._create_model(task_config.task_type, task_config.model_params)
-            
-            # Train with early stopping if XGBoost
-            if self.config.get("use_xgboost", True) and hasattr(model, 'fit'):
-                try:
-                    model.fit(
-                        X_train, y_train,
-                        eval_set=[(X_test, y_test)],
-                        verbose=False
-                    )
-                except:
-                    model.fit(X_train, y_train)
-            else:
-                model.fit(X_train, y_train)
-            
+            model.fit(
+                X_train, y_train,
+                eval_set=[(X_val, y_val)],
+                verbose=False
+            )
+
             # Store model
             self.models[task_name] = model
             self.feature_names = available_features
             self.feature_names_per_task[task_name] = available_features
-            
-            # Evaluate
+
+            # Evaluate: held-out test + train (for overfit gap)
             metrics = self._evaluate_model(model, X_test, y_test, task_config.task_type)
+            train_metrics = self._evaluate_model(model, X_train, y_train, task_config.task_type)
+            if task_config.task_type == "classification":
+                metrics.train_accuracy = train_metrics.accuracy
+                metrics.accuracy_gap = max(0.0, train_metrics.accuracy - metrics.accuracy)
+            else:
+                metrics.train_r2 = train_metrics.r2
+                metrics.r2_gap = max(0.0, train_metrics.r2 - metrics.r2)
             self.metrics[task_name] = metrics
             results[task_name] = metrics
-            
+
             # Cross-validation
             cv_scores = self._cross_validate(model, X, y, task_config.task_type)
-            
+
             logger.info(f"\n{task_name} Results:")
             logger.info(f"  Test Accuracy: {metrics.accuracy:.4f}")
             logger.info(f"  Test F1: {metrics.f1:.4f}")
+            logger.info(f"  Train vs Test gap: {metrics.accuracy_gap if task_config.task_type == 'classification' else metrics.r2_gap:.4f}")
             logger.info(f"  CV Mean: {cv_scores.mean():.4f} (+/- {cv_scores.std()*2:.4f})")
         
         self.is_trained = True
@@ -563,17 +572,23 @@ class UnifiedSideQuestModel:
     def _cross_validate(self, model: Any, X: np.ndarray, 
                         y: np.ndarray, task_type: str) -> np.ndarray:
         """Perform cross-validation"""
-        from sklearn.model_selection import KFold
-        cv = KFold(n_splits=self.config["cv_folds"], 
-                   shuffle=True, random_state=self.config["random_state"])
-        
+        from sklearn.model_selection import KFold, StratifiedKFold
         if task_type == "classification":
+            cv = StratifiedKFold(n_splits=self.config["cv_folds"],
+                                 shuffle=True, random_state=self.config["random_state"])
             scoring = "f1_weighted"
         else:
+            cv = KFold(n_splits=self.config["cv_folds"],
+                       shuffle=True, random_state=self.config["random_state"])
             scoring = "r2"
         
         if hasattr(model, 'get_params'):
-            scores = cross_val_score(model, X, y, cv=cv, scoring=scoring)
+            from sklearn.base import clone
+            cv_model = clone(model)
+            if "early_stopping_rounds" in cv_model.get_params():
+                # CV fits have no eval_set -> early stopping must be off
+                cv_model.set_params(early_stopping_rounds=None)
+            scores = cross_val_score(cv_model, X, y, cv=cv, scoring=scoring)
         else:
             scores = np.array([0.0])
         

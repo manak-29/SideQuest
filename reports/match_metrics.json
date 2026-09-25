@@ -1,0 +1,31 @@
+{
+  "accuracy": 0.9961372585786612,
+  "train_accuracy": 0.999308287219148,
+  "accuracy_gap": 0.003171028640486795,
+  "precision": 0.9912752065638181,
+  "recall": 0.9908744368718956,
+  "f1": 0.9910747812021605,
+  "auc": 0.9999235002771698,
+  "score_r2": 0.9997301842383567,
+  "train_score_r2": 0.9997762737416995,
+  "score_r2_gap": 4.608950334283879e-05,
+  "n_pairs": 399974,
+  "n_features": 26,
+  "n_estimators_fitted": 2000,
+  "model": "XGBClassifier + XGBRegressor (early-stopped, depth<=6)",
+  "gate_pass": true,
+  "overfit_check": {
+    "acc_gap<=0.05": true,
+    "r2_gap<=0.08": true
+  },
+  "top_features": {
+    "drinks_known": 0.17220266163349152,
+    "same_drinks": 0.1511780172586441,
+    "same_smokes": 0.14883840084075928,
+    "smokes_known": 0.09024852514266968,
+    "same_diet": 0.08347572386264801,
+    "same_education": 0.06394153088331223,
+    "essay_cosine": 0.055024612694978714,
+    "age_sim": 0.0423082634806633
+  }
+}

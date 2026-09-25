@@ -1,0 +1,90 @@
+{
+  "all_gates_pass": true,
+  "gates": {
+    "hidden_gem": {
+      "r2": 0.999378554758565,
+      "required_r2": 0.75,
+      "r2_gap": 0.0005627101528868916,
+      "max_gap": 0.05,
+      "cv_ok": true,
+      "pass": 1.0
+    },
+    "safety_score": {
+      "r2": 0.9999387847959036,
+      "required_r2": 0.8,
+      "r2_gap": 0.0,
+      "max_gap": 0.05,
+      "pass": true
+    },
+    "collaboration_auth": {
+      "accuracy": 0.9545409429280397,
+      "required_accuracy": 0.85,
+      "auc": 0.9656844786606318,
+      "required_auc": 0.75,
+      "accuracy_gap": 0.024405990107489894,
+      "max_gap": 0.05,
+      "social_feature_importance": {
+        "has_phone": 0.018329309299588203,
+        "rev_rating_mismatch": 0.04839800298213959,
+        "rev_stars_std": 0.055419426411390305,
+        "rev_n": 0.18779388070106506,
+        "review_count_log": 0.04751601070165634,
+        "rev_avg_words": 0.06443323940038681
+      },
+      "social_features_used": true,
+      "pass": true
+    },
+    "fake_detection": {
+      "accuracy": 0.9536292815630023,
+      "auc": 0.9897800548162643,
+      "pass": true
+    },
+    "solo_matching": {
+      "accuracy": 0.9961372585786612,
+      "auc": 0.9999235002771698,
+      "pass": true
+    }
+  },
+  "unified_metrics": {
+    "hidden_gem": {
+      "accuracy": 0.999378554758565,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "auc_roc": 0.0,
+      "rmse": 0.551614623355999,
+      "r2": 0.999378554758565,
+      "train_accuracy": 0.0,
+      "train_r2": 0.9999412649114519,
+      "accuracy_gap": 0.0,
+      "r2_gap": 0.0005627101528868916
+    },
+    "safety_score": {
+      "accuracy": 0.9999387847959036,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "auc_roc": 0.0,
+      "rmse": 0.022064854315308496,
+      "r2": 0.9999387847959036,
+      "train_accuracy": 0.0,
+      "train_r2": 0.9999216983995892,
+      "accuracy_gap": 0.0,
+      "r2_gap": 0.0
+    },
+    "collaboration_auth": {
+      "accuracy": 0.9545409429280397,
+      "precision": 0.960433247530898,
+      "recall": 0.9545409429280397,
+      "f1": 0.9565329059194602,
+      "auc_roc": 0.9656844786606318,
+      "rmse": 0.0,
+      "r2": 0.0,
+      "train_accuracy": 0.9789469330355296,
+      "train_r2": 0.0,
+      "accuracy_gap": 0.024405990107489894,
+      "r2_gap": 0.0
+    }
+  },
+  "trained_at": "2026-09-25 15:49:07"
+}
